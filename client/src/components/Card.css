@@ -1,0 +1,150 @@
+.card-component {
+  position: relative;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  transition: all var(--transition-normal);
+  user-select: none;
+}
+
+.card-component.disabled {
+  cursor: default;
+}
+
+.card-inner {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  gap: 4px;
+  text-align: center;
+}
+
+/* Category Colors */
+.card-component.exploding {
+  background: linear-gradient(145deg, #FF4757 0%, #C0392B 100%);
+  border: 2px solid #FF6B6B;
+}
+
+.card-component.defuse {
+  background: linear-gradient(145deg, #2ED573 0%, #27AE60 100%);
+  border: 2px solid #58D68D;
+}
+
+.card-component.action {
+  background: linear-gradient(145deg, #3498DB 0%, #2980B9 100%);
+  border: 2px solid #5DADE2;
+}
+
+.card-component.cat {
+  background: linear-gradient(145deg, #9B59B6 0%, #8E44AD 100%);
+  border: 2px solid #AF7AC5;
+}
+
+.card-component.special {
+  background: linear-gradient(145deg, #F39C12 0%, #E67E22 100%);
+  border: 2px solid #F7DC6F;
+}
+
+/* Card Content */
+.card-emoji {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.card-component.small .card-emoji {
+  font-size: 1.5rem;
+}
+
+.card-component.large .card-emoji {
+  font-size: 3rem;
+}
+
+.card-name {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: white;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  line-height: 1.2;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-component.small .card-name {
+  font-size: 0.625rem;
+}
+
+.card-component.large .card-name {
+  font-size: 1rem;
+}
+
+.card-description {
+  font-size: 0.625rem;
+  color: rgba(255, 255, 255, 0.8);
+  line-height: 1.3;
+  margin-top: 4px;
+}
+
+/* Hover Effects */
+.card-component:not(.disabled):hover {
+  box-shadow: var(--shadow-lg), 0 0 20px rgba(255, 255, 255, 0.2);
+}
+
+/* ===== Mobile Card Sizing ===== */
+@media (max-width: 768px) {
+  .card-emoji {
+    font-size: 1.5rem;
+  }
+
+  .card-component.small .card-emoji {
+    font-size: 1.2rem;
+  }
+
+  .card-component.large .card-emoji {
+    font-size: 2rem;
+  }
+
+  .card-name {
+    font-size: 0.65rem;
+  }
+
+  .card-component.small .card-name {
+    font-size: 0.55rem;
+  }
+
+  .card-inner {
+    padding: 6px;
+    gap: 2px;
+  }
+}
+
+@media (max-width: 480px) {
+  .card-emoji {
+    font-size: 1.2rem;
+  }
+
+  .card-component.small .card-emoji {
+    font-size: 1rem;
+  }
+
+  .card-name {
+    font-size: 0.55rem;
+  }
+
+  .card-component.small .card-name {
+    font-size: 0.5rem;
+  }
+
+  .card-description {
+    display: none;
+  }
+
+  .card-inner {
+    padding: 4px;
+  }
+}

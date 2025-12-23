@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="catGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FF6B6B"/>
+      <stop offset="100%" style="stop-color:#FF8E53"/>
+    </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="45" fill="url(#catGrad)"/>
+  <path d="M25 35 L35 20 L45 35 Z" fill="#2D3436"/>
+  <path d="M55 35 L65 20 L75 35 Z" fill="#2D3436"/>
+  <circle cx="35" cy="45" r="8" fill="#2D3436"/>
+  <circle cx="65" cy="45" r="8" fill="#2D3436"/>
+  <circle cx="37" cy="43" r="3" fill="white"/>
+  <circle cx="67" cy="43" r="3" fill="white"/>
+  <ellipse cx="50" cy="60" rx="5" ry="4" fill="#2D3436"/>
+  <path d="M45 65 Q50 72 55 65" stroke="#2D3436" stroke-width="3" fill="none"/>
+  <path d="M50 60 L50 65" stroke="#2D3436" stroke-width="2"/>
+  <text x="50" y="88" text-anchor="middle" font-size="16" font-weight="bold" fill="#2D3436">💣</text>
+</svg>

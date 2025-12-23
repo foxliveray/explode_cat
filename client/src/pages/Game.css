@@ -1,0 +1,504 @@
+.game {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+.game-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 10;
+}
+
+.game-info {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.room-code {
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.turn-info {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.error-toast {
+  position: fixed;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 24px;
+  background: rgba(255, 71, 87, 0.95);
+  border-radius: var(--radius-md);
+  color: white;
+  font-weight: 600;
+  z-index: 100;
+  box-shadow: var(--shadow-lg);
+}
+
+.game-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  gap: 20px;
+  overflow: hidden;
+}
+
+/* Other Players */
+.other-players {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+/* Center Area */
+.center-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+}
+
+.turn-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.turn-indicator span {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.turn-indicator .your-turn {
+  color: var(--color-accent);
+  animation: pulse 1.5s infinite;
+}
+
+.extra-turns {
+  font-size: 0.875rem !important;
+  color: var(--color-danger) !important;
+  font-weight: 600 !important;
+}
+
+.deck-area {
+  display: flex;
+  align-items: center;
+  gap: 40px;
+}
+
+.deck {
+  position: relative;
+  width: 120px;
+  height: 168px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, #2D3436 0%, #636E72 100%);
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-lg);
+  transition: all var(--transition-normal);
+}
+
+.deck.clickable {
+  cursor: pointer;
+}
+
+.deck.clickable:hover {
+  transform: scale(1.05);
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-glow);
+}
+
+.deck::before,
+.deck::after {
+  content: '';
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  background: inherit;
+  border-radius: inherit;
+  z-index: -1;
+}
+
+.deck::before {
+  transform: translate(4px, 4px);
+  opacity: 0.7;
+}
+
+.deck::after {
+  transform: translate(8px, 8px);
+  opacity: 0.4;
+}
+
+.deck-back {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.deck-count {
+  font-size: 2rem;
+  font-weight: 800;
+  color: white;
+}
+
+.deck-label {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.7);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+.discard-pile {
+  width: 120px;
+  height: 168px;
+}
+
+.discard-empty {
+  width: 100%;
+  height: 100%;
+  border: 3px dashed rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+/* My Hand */
+.my-hand-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.hand-label {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.my-hand {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 16px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.hand-card {
+  cursor: pointer;
+  transition: all var(--transition-normal);
+}
+
+.hand-card.selected {
+  filter: brightness(1.2);
+}
+
+.hand-card.selected::after {
+  content: '✓';
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 24px;
+  height: 24px;
+  background: var(--color-success);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  color: white;
+  font-weight: bold;
+}
+
+/* Action Bar */
+.action-bar {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.waiting-message {
+  color: var(--text-secondary);
+  font-size: 1.125rem;
+}
+
+/* Game Over */
+.game-over-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.game-over-modal {
+  background: var(--gradient-card);
+  padding: 48px;
+  border-radius: var(--radius-xl);
+  text-align: center;
+  box-shadow: var(--shadow-lg);
+}
+
+.game-over-modal h1 {
+  font-size: 2.5rem;
+  margin-bottom: 16px;
+}
+
+.winner-name {
+  font-size: 1.5rem;
+  color: var(--color-accent);
+  font-weight: 700;
+  margin-bottom: 32px;
+}
+
+/* Header Buttons */
+.header-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-danger {
+  color: #ff4757 !important;
+}
+
+.btn-danger:hover {
+  background: rgba(255, 71, 87, 0.2) !important;
+}
+
+/* Quit Confirm Modal */
+.quit-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.quit-confirm-modal {
+  background: var(--gradient-card);
+  padding: 32px;
+  border-radius: var(--radius-xl);
+  text-align: center;
+  box-shadow: var(--shadow-lg);
+  max-width: 400px;
+  width: 90%;
+}
+
+.quit-confirm-modal h2 {
+  margin: 0 0 12px 0;
+  font-size: 1.5rem;
+}
+
+.quit-confirm-modal p {
+  color: var(--text-secondary);
+  margin-bottom: 24px;
+}
+
+.quit-buttons {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+}
+
+.quit-buttons .btn-danger {
+  background: #ff4757;
+  color: white !important;
+}
+
+.quit-buttons .btn-danger:hover {
+  background: #ff6b6b !important;
+}
+
+/* ===== Mobile Responsive for Game ===== */
+@media (max-width: 768px) {
+  .game-header {
+    padding: 8px 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .game-info {
+    gap: 8px;
+    font-size: 0.85rem;
+  }
+
+  .header-buttons {
+    gap: 4px;
+  }
+
+  .header-buttons .btn-sm {
+    padding: 6px 10px;
+    font-size: 0.75rem;
+  }
+
+  .game-main {
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .other-players {
+    gap: 8px;
+  }
+
+  .center-area {
+    gap: 16px;
+  }
+
+  .deck-area {
+    gap: 20px;
+  }
+
+  .deck {
+    width: 80px;
+    height: 112px;
+  }
+
+  .deck-count {
+    font-size: 1.5rem;
+  }
+
+  .deck-label {
+    font-size: 0.6rem;
+    letter-spacing: 1px;
+  }
+
+  .discard-pile {
+    width: 80px;
+    height: 112px;
+  }
+
+  .turn-indicator span {
+    font-size: 1rem;
+  }
+
+  .my-hand {
+    gap: 4px;
+    padding: 8px;
+  }
+
+  .action-bar {
+    padding: 12px;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .action-bar .btn {
+    flex: 1;
+    min-width: 100px;
+  }
+}
+
+@media (max-width: 480px) {
+  .game-header {
+    padding: 6px 8px;
+  }
+
+  .room-code {
+    font-size: 0.8rem;
+  }
+
+  .turn-info {
+    font-size: 0.75rem;
+  }
+
+  .header-buttons .btn-sm {
+    padding: 4px 8px;
+    font-size: 0.7rem;
+  }
+
+  .game-main {
+    padding: 8px;
+    gap: 8px;
+  }
+
+  .deck {
+    width: 60px;
+    height: 84px;
+  }
+
+  .deck-count {
+    font-size: 1.2rem;
+  }
+
+  .discard-pile {
+    width: 60px;
+    height: 84px;
+  }
+
+  .deck-area {
+    gap: 12px;
+  }
+
+  .my-hand {
+    gap: 2px;
+    padding: 4px;
+    max-height: 150px;
+    overflow-y: auto;
+  }
+
+  .action-bar {
+    padding: 8px;
+  }
+
+  .action-bar .btn {
+    padding: 10px 12px;
+    font-size: 0.85rem;
+  }
+
+  .waiting-message {
+    font-size: 0.9rem;
+  }
+}
+
+/* Landscape orientation on mobile */
+@media (max-height: 500px) and (orientation: landscape) {
+  .game-main {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .other-players {
+    width: 100%;
+  }
+
+  .center-area {
+    flex-direction: row;
+    flex: 1;
+  }
+
+  .my-hand-area {
+    width: 100%;
+  }
+}

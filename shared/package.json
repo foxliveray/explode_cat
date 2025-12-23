@@ -1,0 +1,13 @@
+{
+  "name": "@explode-cat/shared",
+  "version": "1.0.0",
+  "main": "types/index.ts",
+  "types": "types/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}
