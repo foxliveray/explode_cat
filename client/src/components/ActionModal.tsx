@@ -224,6 +224,34 @@ export default function ActionModal({
     );
   }
 
+  // Garbage Collection
+  if (action.type === 'select_card_for_garbage' && isMyAction) {
+    const { selectCardForGarbage } = useSocketStore();
+    return (
+      <motion.div 
+        className="action-modal-overlay"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+      >
+        <div className="action-modal">
+          <h2>🗑️ 垃圾回收</h2>
+          <p className="action-hint">所有玩家必须选一张牌放回牌堆</p>
+          <div className="cards-grid">
+            {myHand.map(card => (
+              <div 
+                key={card.id}
+                className="selectable-card"
+                onClick={() => selectCardForGarbage(card.id)}
+              >
+                <Card card={card} size="small" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
+
   // Reorder Cards (Alter the Future)
   if (action.type === 'reorder_cards' && isMyAction && action.cards) {
     // Use a local component to manage state

@@ -138,6 +138,7 @@ export class GameEngine {
       winner: this.state.winner ? clientPlayers.find(p => p.id === this.state.winner!.id)! : null,
       turnCount: this.state.turnCount,
       logs: this.state.logs.slice(-20), // Last 20 logs
+      topDeckCard: this.state.deck.length > 0 && this.state.deck[0].faceUp ? this.state.deck[0] : undefined,
     };
   }
 
@@ -149,6 +150,474 @@ export class GameEngine {
   // Check if it's the player's turn
   isPlayersTurn(playerId: string): boolean {
     return this.getCurrentPlayer().id === playerId;
+  }
+
+  // Update player's socket ID (for reconnection)
+  updatePlayerSocketId(playerId: string, newSocketId: string): void {
+    const player = this.state.players.find(p => p.id === playerId);
+    if (player) {
+      player.socketId = newSocketId;
+    }
+  }
+
+  // 获取下一个有否决牌的玩家（按顺序）
+  private getNextPlayerWithNope(startIndex: number, excludePlayerId: string): Player | null {
+    const playerCount = this.state.players.length;
+    for (let i = 1; i < playerCount; i++) {
+      const index = (startIndex + i * this.state.direction + playerCount) % playerCount;
+      const player = this.state.players[index];
+      if (player.isAlive && player.id !== excludePlayerId) {
+        const hasNope = player.hand.some(c => c.type === CardType.NOPE);
+        if (hasNope) {
+          return player;
+        }
+      }
+    }
+    return null;
+  }
+
+  // 获取所有有否决牌的其他玩家
+  private getPlayersWithNope(excludePlayerId: string): string[] {
+    return this.state.players
+      .filter(p => p.isAlive && p.id !== excludePlayerId && p.hand.some(c => c.type === CardType.NOPE))
+      .map(p => p.id);
+  }
+
+  // 启动否决窗口
+  startNopeWindow(originalPlayerId: string, cardTypes: CardType[], originalActionType: PendingActionType): void {
+    const playersWithNope = this.getPlayersWithNope(originalPlayerId);
+    
+    if (playersWithNope.length === 0) {
+      // 没有人有否决牌，直接执行
+      return;
+    }
+
+    // 找到第一个有否决牌的玩家（按顺序）
+    const originalPlayerIndex = this.state.players.findIndex(p => p.id === originalPlayerId);
+    const firstPlayer = this.getNextPlayerWithNope(originalPlayerIndex, originalPlayerId);
+    
+    if (!firstPlayer) {
+      return;
+    }
+
+    this.state.phase = GamePhase.NOPE_WINDOW;
+    this.state.pendingAction = {
+      type: PendingActionType.NOPE_WINDOW,
+      playerId: firstPlayer.id, // 当前询问的玩家
+      waitingForPlayers: playersWithNope, // 还没回应的玩家
+      originalAction: {
+        type: originalActionType,
+        playerId: originalPlayerId,
+        cardTypes: cardTypes,
+      },
+      nopeChainCount: 0,
+    };
+  }
+
+  // 玩家打出否决牌
+  playNope(playerId: string, cardId: string): { success: boolean; error?: string } {
+    if (this.state.phase !== GamePhase.NOPE_WINDOW || !this.state.pendingAction) {
+      return { success: false, error: 'Not in nope window' };
+    }
+
+    if (this.state.pendingAction.playerId !== playerId) {
+      return { success: false, error: 'Not your turn to respond' };
+    }
+
+    const player = this.state.players.find(p => p.id === playerId);
+    if (!player) {
+      return { success: false, error: 'Player not found' };
+    }
+
+    const cardIndex = player.hand.findIndex(c => c.id === cardId && c.type === CardType.NOPE);
+    if (cardIndex === -1) {
+      return { success: false, error: 'Nope card not found' };
+    }
+
+    // 移除并弃掉否决牌
+    const nopeCard = player.hand.splice(cardIndex, 1)[0];
+    this.state.discardPile.push(nopeCard);
+
+    const nopeCount = (this.state.pendingAction.nopeChainCount || 0) + 1;
+    
+    // 奇数次否决 = 取消动作，偶数次 = 恢复动作
+    if (nopeCount % 2 === 1) {
+      // 否决成功，取消原动作
+      this.addLog('played Nope! Action cancelled.', playerId, undefined, [CardType.NOPE]);
+      
+      // 检查是否有人可以再否决这个否决
+      const playersWithNope = this.getPlayersWithNope(playerId);
+      if (playersWithNope.length > 0) {
+        // 开启一个新的否决窗口，让其他人可以否决这个否决
+        const playerIndex = this.state.players.findIndex(p => p.id === playerId);
+        const nextPlayer = this.getNextPlayerWithNope(playerIndex, playerId);
+        
+        if (nextPlayer) {
+          this.state.pendingAction = {
+            type: PendingActionType.NOPE_WINDOW,
+            playerId: nextPlayer.id,
+            waitingForPlayers: playersWithNope,
+            originalAction: this.state.pendingAction.originalAction,
+            nopeChainCount: nopeCount,
+          };
+          return { success: true };
+        }
+      }
+      
+      // 没有人能否决这个否决，动作被取消
+      this.state.pendingAction = null;
+      this.state.phase = GamePhase.PLAYING;
+    } else {
+      // 偶数次否决 = 恢复原动作（否决了否决）
+      this.addLog('played Nope! Action restored.', playerId, undefined, [CardType.NOPE]);
+      
+      // 继续检查是否有人可以再否决
+      const playersWithNope = this.getPlayersWithNope(playerId);
+      if (playersWithNope.length > 0) {
+        const playerIndex = this.state.players.findIndex(p => p.id === playerId);
+        const nextPlayer = this.getNextPlayerWithNope(playerIndex, playerId);
+        
+        if (nextPlayer) {
+          this.state.pendingAction = {
+            type: PendingActionType.NOPE_WINDOW,
+            playerId: nextPlayer.id,
+            waitingForPlayers: playersWithNope,
+            originalAction: this.state.pendingAction.originalAction,
+            nopeChainCount: nopeCount,
+          };
+          return { success: true };
+        }
+      }
+      
+      // 没有人能否决，恢复原动作执行
+      this.executeOriginalAction();
+    }
+    
+    return { success: true };
+  }
+
+  // 玩家跳过否决机会
+  passNope(playerId: string): { success: boolean; error?: string } {
+    if (this.state.phase !== GamePhase.NOPE_WINDOW || !this.state.pendingAction) {
+      return { success: false, error: 'Not in nope window' };
+    }
+
+    if (this.state.pendingAction.playerId !== playerId) {
+      return { success: false, error: 'Not your turn to respond' };
+    }
+
+    // 从等待列表中移除该玩家
+    const waitingPlayers = this.state.pendingAction.waitingForPlayers || [];
+    const newWaitingPlayers = waitingPlayers.filter(id => id !== playerId);
+    
+    // 找下一个有否决牌的玩家
+    const playerIndex = this.state.players.findIndex(p => p.id === playerId);
+    let nextPlayer: Player | null = null;
+    
+    for (const waitingId of newWaitingPlayers) {
+      const candidate = this.state.players.find(p => p.id === waitingId);
+      if (candidate && candidate.hand.some(c => c.type === CardType.NOPE)) {
+        nextPlayer = candidate;
+        break;
+      }
+    }
+
+    if (nextPlayer) {
+      // 还有人可以否决，询问下一个玩家
+      this.state.pendingAction.playerId = nextPlayer.id;
+      this.state.pendingAction.waitingForPlayers = newWaitingPlayers;
+    } else {
+      // 所有人都跳过了
+      const nopeCount = this.state.pendingAction.nopeChainCount || 0;
+      
+      if (nopeCount % 2 === 0) {
+        // 偶数次否决（包括0次），执行原动作
+        this.executeOriginalAction();
+      } else {
+        // 奇数次否决，动作被取消
+        this.state.pendingAction = null;
+        this.state.phase = GamePhase.PLAYING;
+      }
+    }
+
+    return { success: true };
+  }
+
+  // 统一的 Nope Window 处理逻辑
+  private triggerActionWithNopeWindow(player: Player, cardTypeOrTypes: CardType | CardType[], action: () => void, pendingActionType: PendingActionType = PendingActionType.NONE): { success: boolean; needsTarget?: boolean } {
+    const cardTypes = Array.isArray(cardTypeOrTypes) ? cardTypeOrTypes : [cardTypeOrTypes];
+    const playersWithNope = this.getPlayersWithNope(player.id);
+    
+    if (playersWithNope.length > 0) {
+      const playerIndex = this.state.players.findIndex(p => p.id === player.id);
+      const firstNopePlayer = this.getNextPlayerWithNope(playerIndex, player.id);
+      if (firstNopePlayer) {
+        this.state.phase = GamePhase.NOPE_WINDOW;
+        this.state.pendingAction = {
+          type: PendingActionType.NOPE_WINDOW,
+          playerId: firstNopePlayer.id,
+          waitingForPlayers: playersWithNope,
+          originalAction: {
+            type: pendingActionType,
+            playerId: player.id,
+            cardTypes: cardTypes,
+          },
+          nopeChainCount: 0,
+        };
+        return { success: true, needsTarget: pendingActionType !== PendingActionType.NONE };
+      }
+    }
+    
+    // 无人有否决牌，直接执行动作
+    if (pendingActionType !== PendingActionType.NONE) {
+      // 需要后续交互的动作（如选择目标）
+      this.state.pendingAction = {
+        type: pendingActionType,
+        playerId: player.id,
+      };
+      // 特殊处理 discard selection 需要 cards 参数
+      if (pendingActionType === PendingActionType.SELECT_CARD_FROM_DISCARD) {
+         this.state.pendingAction.cards = this.state.discardPile.filter(c => !this.state.lastPlayedCards.includes(c));
+      }
+      this.state.phase = GamePhase.AWAITING_ACTION;
+      return { success: true, needsTarget: true };
+    } else {
+      // 立即执行的动作
+      action();
+      return { success: true };
+    }
+  }
+
+  // 执行原始动作
+  private executeOriginalAction(): void {
+    if (!this.state.pendingAction?.originalAction) {
+      this.state.pendingAction = null;
+      this.state.phase = GamePhase.PLAYING;
+      return;
+    }
+
+    const { type, playerId, cardTypes } = this.state.pendingAction.originalAction;
+    const player = this.state.players.find(p => p.id === playerId);
+    
+    if (!player || !cardTypes || cardTypes.length === 0) {
+      this.state.pendingAction = null;
+      this.state.phase = GamePhase.PLAYING;
+      return;
+    }
+
+    // 清除 pendingAction，准备执行动作
+    this.state.pendingAction = null;
+    this.state.phase = GamePhase.PLAYING;
+
+    // 检查是否是 Combo
+    if (cardTypes.length > 1) {
+      // 简单的 Combo 判断逻辑
+      if (cardTypes.length === 2) {
+        // Two of a kind
+        this.state.pendingAction = { type: PendingActionType.SELECT_PLAYER, playerId: player.id };
+        this.state.phase = GamePhase.AWAITING_ACTION;
+        return;
+      } else if (cardTypes.length === 3) {
+        // Three of a kind
+        this.state.pendingAction = { type: PendingActionType.SELECT_PLAYER, playerId: player.id };
+        this.state.phase = GamePhase.AWAITING_ACTION;
+        return;
+      } else if (cardTypes.length === 5) {
+        // Five different
+        if (this.state.discardPile.length > 0) {
+          this.state.pendingAction = {
+            type: PendingActionType.SELECT_CARD_FROM_DISCARD,
+            playerId: player.id,
+            cards: this.state.discardPile.filter(c => !this.state.lastPlayedCards.includes(c)),
+          };
+          this.state.phase = GamePhase.AWAITING_ACTION;
+        }
+        return;
+      }
+    }
+
+    const cardType = cardTypes[0];
+
+    // 根据卡牌类型执行具体逻辑
+    switch (cardType) {
+      case CardType.ATTACK:
+        this.endTurnWithAttack(player, 2);
+        break;
+      case CardType.TARGETED_ATTACK:
+        this.state.pendingAction = { type: PendingActionType.SELECT_PLAYER, playerId: player.id };
+        this.state.phase = GamePhase.AWAITING_ACTION;
+        break;
+      case CardType.SKIP:
+        this.endTurn();
+        break;
+      case CardType.SUPER_SKIP:
+        player.turnsToTake = 0;
+        this.endTurn();
+        break;
+      case CardType.FAVOR:
+        this.state.pendingAction = { type: PendingActionType.SELECT_PLAYER, playerId: player.id };
+        this.state.phase = GamePhase.AWAITING_ACTION;
+        break;
+      case CardType.SHUFFLE:
+        this.shuffleDeck();
+        break;
+      case CardType.SEE_THE_FUTURE_3:
+        this.state.pendingAction = { type: PendingActionType.VIEW_CARDS, playerId: player.id, cards: this.peekDeck(3), count: 3 };
+        this.state.phase = GamePhase.AWAITING_ACTION;
+        break;
+      case CardType.SEE_THE_FUTURE_5:
+        this.state.pendingAction = { type: PendingActionType.VIEW_CARDS, playerId: player.id, cards: this.peekDeck(5), count: 5 };
+        this.state.phase = GamePhase.AWAITING_ACTION;
+        break;
+      case CardType.ALTER_THE_FUTURE_3:
+        this.state.pendingAction = { type: PendingActionType.REORDER_CARDS, playerId: player.id, cards: this.peekDeck(3), count: 3 };
+        this.state.phase = GamePhase.AWAITING_ACTION;
+        break;
+      case CardType.ALTER_THE_FUTURE_5:
+        this.state.pendingAction = { type: PendingActionType.REORDER_CARDS, playerId: player.id, cards: this.peekDeck(5), count: 5 };
+        this.state.phase = GamePhase.AWAITING_ACTION;
+        break;
+      case CardType.REVERSE:
+        this.state.direction = this.state.direction === GameDirection.CLOCKWISE 
+          ? GameDirection.COUNTER_CLOCKWISE 
+          : GameDirection.CLOCKWISE;
+        this.endTurn();
+        break;
+      case CardType.DRAW_FROM_BOTTOM:
+        this.drawCardFromBottom(player);
+        break;
+      case CardType.GARBAGE_COLLECTION:
+        this.startGarbageCollection(player.id);
+        break;
+      case CardType.CATOMIC_BOMB:
+        this.executeCatomicBomb();
+        break;
+      case CardType.SWAP_TOP_AND_BOTTOM:
+        this.swapTopAndBottom();
+        break;
+    }
+  }
+
+  // Play a combo
+  private playCombo(player: Player, cards: Card[], comboType: ComboType): { success: boolean; error?: string; comboType?: ComboType; needsTarget?: boolean } {
+    // Remove cards from hand
+    cards.forEach(card => {
+      const index = player.hand.findIndex(c => c.id === card.id);
+      if (index !== -1) player.hand.splice(index, 1);
+    });
+
+    // Add to discard
+    this.state.discardPile.push(...cards);
+    this.state.lastPlayedCards = cards;
+
+    const cardTypes = cards.map(c => c.type);
+    
+    if (comboType === ComboType.TWO_OF_A_KIND) {
+      this.addLog('played Two of a Kind', player.id, undefined, cardTypes);
+      return { 
+        ...this.triggerActionWithNopeWindow(player, cardTypes, () => {}, PendingActionType.SELECT_PLAYER),
+        comboType 
+      };
+    }
+    
+    if (comboType === ComboType.THREE_OF_A_KIND) {
+      this.addLog('played Three of a Kind', player.id, undefined, cardTypes);
+      return { 
+        ...this.triggerActionWithNopeWindow(player, cardTypes, () => {}, PendingActionType.SELECT_PLAYER),
+        comboType
+      };
+    }
+    
+    if (comboType === ComboType.FIVE_DIFFERENT) {
+      this.addLog('played Five Different Cards', player.id, undefined, cardTypes);
+      return {
+        ...this.triggerActionWithNopeWindow(player, cardTypes, () => {}, PendingActionType.SELECT_CARD_FROM_DISCARD),
+        comboType
+      };
+    }
+
+    return { success: false, error: 'Invalid combo' };
+  }
+
+  // Process card effect
+  private processCardEffect(player: Player, card: Card): { success: boolean; needsTarget?: boolean } {
+    switch (card.type) {
+      case CardType.NOPE:
+        // NOPE 的逻辑保持不变
+        this.addLog('played Nope (no action to cancel)', player.id, undefined, [card.type]);
+        return { success: true };
+
+      case CardType.ATTACK:
+        this.addLog('played Attack', player.id, undefined, [card.type]);
+        return this.triggerActionWithNopeWindow(player, card.type, () => this.endTurnWithAttack(player, 2));
+
+      case CardType.TARGETED_ATTACK:
+        this.addLog('played Targeted Attack', player.id, undefined, [card.type]);
+        return this.triggerActionWithNopeWindow(player, card.type, () => {}, PendingActionType.SELECT_PLAYER);
+
+      case CardType.SKIP:
+        this.addLog('played Skip', player.id, undefined, [card.type]);
+        return this.triggerActionWithNopeWindow(player, card.type, () => this.endTurn());
+
+      case CardType.SUPER_SKIP:
+        this.addLog('played Super Skip', player.id, undefined, [card.type]);
+        return this.triggerActionWithNopeWindow(player, card.type, () => {
+          player.turnsToTake = 0;
+          this.endTurn();
+        });
+
+      case CardType.FAVOR:
+        this.addLog('played Favor', player.id, undefined, [card.type]);
+        return this.triggerActionWithNopeWindow(player, card.type, () => {}, PendingActionType.SELECT_PLAYER);
+
+      case CardType.SHUFFLE:
+        this.addLog('played Shuffle', player.id, undefined, [card.type]);
+        return this.triggerActionWithNopeWindow(player, card.type, () => this.shuffleDeck());
+
+      case CardType.SEE_THE_FUTURE_3:
+        this.addLog('played See the Future', player.id, undefined, [card.type]);
+        return this.triggerActionWithNopeWindow(player, card.type, () => {}, PendingActionType.VIEW_CARDS);
+
+      case CardType.SEE_THE_FUTURE_5:
+        this.addLog('played See the Future (5x)', player.id, undefined, [card.type]);
+        return this.triggerActionWithNopeWindow(player, card.type, () => {}, PendingActionType.VIEW_CARDS);
+
+      case CardType.ALTER_THE_FUTURE_3:
+        this.addLog('played Alter the Future', player.id, undefined, [card.type]);
+        return this.triggerActionWithNopeWindow(player, card.type, () => {}, PendingActionType.REORDER_CARDS);
+
+      case CardType.ALTER_THE_FUTURE_5:
+        this.addLog('played Alter the Future (5x)', player.id, undefined, [card.type]);
+        return this.triggerActionWithNopeWindow(player, card.type, () => {}, PendingActionType.REORDER_CARDS);
+
+      case CardType.REVERSE:
+        this.addLog('played Reverse', player.id, undefined, [card.type]);
+        return this.triggerActionWithNopeWindow(player, card.type, () => {
+          this.state.direction = this.state.direction === GameDirection.CLOCKWISE 
+            ? GameDirection.COUNTER_CLOCKWISE 
+            : GameDirection.CLOCKWISE;
+          this.endTurn();
+        });
+
+      case CardType.DRAW_FROM_BOTTOM:
+        this.addLog('played Draw From Bottom', player.id, undefined, [card.type]);
+        return this.triggerActionWithNopeWindow(player, card.type, () => this.drawCardFromBottom(player));
+      
+      case CardType.SWAP_TOP_AND_BOTTOM:
+        this.addLog('played Swap Top and Bottom', player.id, undefined, [card.type]);
+        return this.triggerActionWithNopeWindow(player, card.type, () => this.swapTopAndBottom());
+
+      case CardType.GARBAGE_COLLECTION:
+        this.addLog('played Garbage Collection', player.id, undefined, [card.type]);
+        return this.triggerActionWithNopeWindow(player, card.type, () => this.startGarbageCollection(player.id)); 
+
+      case CardType.CATOMIC_BOMB:
+        this.addLog('played Catomic Bomb!', player.id, undefined, [card.type]);
+        return this.triggerActionWithNopeWindow(player, card.type, () => this.executeCatomicBomb());
+
+      default:
+        return { success: false };
+    }
   }
 
   // Add a log entry
@@ -242,55 +711,7 @@ export class GameEngine {
     return types.size === 5;
   }
 
-  // Play a combo
-  private playCombo(player: Player, cards: Card[], comboType: ComboType): { success: boolean; error?: string; comboType?: ComboType; needsTarget?: boolean } {
-    // Remove cards from hand
-    cards.forEach(card => {
-      const index = player.hand.findIndex(c => c.id === card.id);
-      if (index !== -1) player.hand.splice(index, 1);
-    });
 
-    // Add to discard
-    this.state.discardPile.push(...cards);
-    this.state.lastPlayedCards = cards;
-
-    const cardTypes = cards.map(c => c.type);
-    
-    if (comboType === ComboType.TWO_OF_A_KIND) {
-      this.addLog('played Two of a Kind', player.id, undefined, cardTypes);
-      this.state.pendingAction = {
-        type: PendingActionType.SELECT_PLAYER,
-        playerId: player.id,
-      };
-      this.state.phase = GamePhase.AWAITING_ACTION;
-      return { success: true, comboType, needsTarget: true };
-    }
-    
-    if (comboType === ComboType.THREE_OF_A_KIND) {
-      this.addLog('played Three of a Kind', player.id, undefined, cardTypes);
-      this.state.pendingAction = {
-        type: PendingActionType.SELECT_PLAYER,
-        playerId: player.id,
-      };
-      this.state.phase = GamePhase.AWAITING_ACTION;
-      return { success: true, comboType, needsTarget: true };
-    }
-    
-    if (comboType === ComboType.FIVE_DIFFERENT) {
-      this.addLog('played Five Different Cards', player.id, undefined, cardTypes);
-      if (this.state.discardPile.length > 0) {
-        this.state.pendingAction = {
-          type: PendingActionType.SELECT_CARD_FROM_DISCARD,
-          playerId: player.id,
-          cards: this.state.discardPile.filter(c => !cards.includes(c)),
-        };
-        this.state.phase = GamePhase.AWAITING_ACTION;
-      }
-      return { success: true, comboType, needsTarget: true };
-    }
-
-    return { success: false, error: 'Invalid combo' };
-  }
 
   // Play a single card
   private playSingleCard(player: Player, card: Card): { success: boolean; error?: string; needsTarget?: boolean } {
@@ -313,126 +734,7 @@ export class GameEngine {
     return this.processCardEffect(player, card);
   }
 
-  // Process card effect
-  private processCardEffect(player: Player, card: Card): { success: boolean; needsTarget?: boolean } {
-    switch (card.type) {
-      case CardType.ATTACK:
-        this.addLog('played Attack', player.id, undefined, [card.type]);
-        this.endTurnWithAttack(player, 2);
-        return { success: true };
 
-      case CardType.TARGETED_ATTACK:
-        this.addLog('played Targeted Attack', player.id, undefined, [card.type]);
-        this.state.pendingAction = {
-          type: PendingActionType.SELECT_PLAYER,
-          playerId: player.id,
-        };
-        this.state.phase = GamePhase.AWAITING_ACTION;
-        return { success: true, needsTarget: true };
-
-      case CardType.SKIP:
-        this.addLog('played Skip', player.id, undefined, [card.type]);
-        this.endTurn();
-        return { success: true };
-
-      case CardType.SUPER_SKIP:
-        this.addLog('played Super Skip', player.id, undefined, [card.type]);
-        player.turnsToTake = 0;
-        this.endTurn();
-        return { success: true };
-
-      case CardType.FAVOR:
-        this.addLog('played Favor', player.id, undefined, [card.type]);
-        this.state.pendingAction = {
-          type: PendingActionType.SELECT_PLAYER,
-          playerId: player.id,
-        };
-        this.state.phase = GamePhase.AWAITING_ACTION;
-        return { success: true, needsTarget: true };
-
-      case CardType.SHUFFLE:
-        this.addLog('played Shuffle', player.id, undefined, [card.type]);
-        this.shuffleDeck();
-        return { success: true };
-
-      case CardType.SEE_THE_FUTURE_3:
-        this.addLog('played See the Future', player.id, undefined, [card.type]);
-        // See the Future: only view, don't reorder
-        this.state.pendingAction = {
-          type: PendingActionType.VIEW_CARDS,
-          playerId: player.id,
-          cards: this.peekDeck(3),
-          count: 3,
-        };
-        this.state.phase = GamePhase.AWAITING_ACTION;
-        return { success: true };
-
-      case CardType.SEE_THE_FUTURE_5:
-        this.addLog('played See the Future (5x)', player.id, undefined, [card.type]);
-        // See the Future: only view, don't reorder
-        this.state.pendingAction = {
-          type: PendingActionType.VIEW_CARDS,
-          playerId: player.id,
-          cards: this.peekDeck(5),
-          count: 5,
-        };
-        this.state.phase = GamePhase.AWAITING_ACTION;
-        return { success: true };
-
-      case CardType.ALTER_THE_FUTURE_3:
-        this.addLog('played Alter the Future', player.id, undefined, [card.type]);
-        this.state.pendingAction = {
-          type: PendingActionType.REORDER_CARDS,
-          playerId: player.id,
-          cards: this.peekDeck(3),
-          count: 3,
-        };
-        this.state.phase = GamePhase.AWAITING_ACTION;
-        return { success: true };
-
-      case CardType.ALTER_THE_FUTURE_5:
-        this.addLog('played Alter the Future (5x)', player.id, undefined, [card.type]);
-        this.state.pendingAction = {
-          type: PendingActionType.REORDER_CARDS,
-          playerId: player.id,
-          cards: this.peekDeck(5),
-          count: 5,
-        };
-        this.state.phase = GamePhase.AWAITING_ACTION;
-        return { success: true };
-
-      case CardType.REVERSE:
-        this.addLog('played Reverse', player.id, undefined, [card.type]);
-        this.state.direction = this.state.direction === GameDirection.CLOCKWISE 
-          ? GameDirection.COUNTER_CLOCKWISE 
-          : GameDirection.CLOCKWISE;
-        this.endTurn();
-        return { success: true };
-
-      case CardType.DRAW_FROM_BOTTOM:
-        this.addLog('played Draw From Bottom', player.id, undefined, [card.type]);
-        this.drawCardFromBottom(player);
-        return { success: true };
-
-      case CardType.SWAP_TOP_AND_BOTTOM:
-        this.addLog('played Swap Top and Bottom', player.id, undefined, [card.type]);
-        this.swapTopAndBottom();
-        return { success: true };
-
-      case CardType.GARBAGE_COLLECTION:
-        this.addLog('played Garbage Collection', player.id, undefined, [card.type]);
-        this.startGarbageCollection(player.id);
-        return { success: true };
-
-      case CardType.CATOMIC_BOMB:
-        this.addLog('played Catomic Bomb!', player.id, undefined, [card.type]);
-        this.executeCatomicBomb();
-        return { success: true };
-
-      default:
-        return { success: false };
-    }
-  }
 
   // Draw a card
   drawCard(playerId: string): { success: boolean; error?: string; card?: Card; exploded?: boolean } {
@@ -690,29 +992,82 @@ export class GameEngine {
     }
   }
 
-  // Execute garbage collection - shuffle discard pile back into deck
+  // Execute garbage collection - start the process
   private startGarbageCollection(initiatorId: string): void {
-    // Take all cards from discard pile (except Garbage Collection itself which is already there)
-    const garbageCards = this.state.discardPile.slice();
+    // Find all alive players who have cards
+    const eligiblePlayers = this.state.players
+      .filter(p => p.isAlive && p.hand.length > 0)
+      .map(p => p.id);
     
-    if (garbageCards.length === 0) {
-      this.addLog('no cards to recycle', initiatorId);
+    if (eligiblePlayers.length === 0) {
+      this.addLog('no players have cards to recycle', initiatorId);
+      this.state.pendingAction = null;
+      this.state.phase = GamePhase.PLAYING;
+      this.endTurn();
       return;
     }
+
+    // Sort players starting from the next player after initiator (standard Uno/game direction)
+    // Actually for fairness usually it starts from next player.
+    // Let's just use the order in players array, rotated to start after current player (initiator)
+    const initiatorIndex = this.state.players.findIndex(p => p.id === initiatorId);
+    const playerCount = this.state.players.length;
     
-    // Clear discard pile
-    this.state.discardPile = [];
-    
-    // Shuffle garbage cards and put them at the bottom of the deck
-    for (let i = garbageCards.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [garbageCards[i], garbageCards[j]] = [garbageCards[j], garbageCards[i]];
+    // Create ordered list of players starting from next player
+    const orderedPlayers: string[] = [];
+    for (let i = 1; i <= playerCount; i++) {
+        const idx = (initiatorIndex + i) % playerCount;
+        const p = this.state.players[idx];
+        if (eligiblePlayers.includes(p.id)) {
+            orderedPlayers.push(p.id);
+        }
     }
+
+    this.state.phase = GamePhase.AWAITING_ACTION;
+    this.state.pendingAction = {
+      type: PendingActionType.SELECT_CARD_FOR_GARBAGE,
+      playerId: orderedPlayers[0],
+      waitingForPlayers: orderedPlayers.slice(1), // Others wait
+    };
     
-    // Add to bottom of deck
-    this.state.deck.push(...garbageCards);
+    this.addLog('started Garbage Collection', initiatorId);
+  }
+
+  // Handle action: select card for garbage collection
+  selectCardForGarbage(playerId: string, cardId: string): { success: boolean; error?: string } {
+    if (!this.state.pendingAction || 
+        this.state.pendingAction.type !== PendingActionType.SELECT_CARD_FOR_GARBAGE ||
+        this.state.pendingAction.playerId !== playerId) {
+      return { success: false, error: 'Not your turn to select for garbage' };
+    }
+
+    const player = this.state.players.find(p => p.id === playerId);
+    if (!player) return { success: false, error: 'Player not found' };
+
+    const cardIndex = player.hand.findIndex(c => c.id === cardId);
+    if (cardIndex === -1) return { success: false, error: 'Card not found' };
+
+    // Remove card and add to deck (will shuffle later)
+    const card = player.hand.splice(cardIndex, 1)[0];
+    this.state.deck.push(card);
     
-    this.addLog(`recycled ${garbageCards.length} cards into the deck`, initiatorId);
+    // Log privately or publicly? Publicly is fine as "Player gave a card"
+    this.addLog('recycled a card', playerId);
+
+    // Check if there are more players waiting
+    if (this.state.pendingAction.waitingForPlayers && this.state.pendingAction.waitingForPlayers.length > 0) {
+        const nextPlayerId = this.state.pendingAction.waitingForPlayers.shift();
+        this.state.pendingAction.playerId = nextPlayerId!;
+    } else {
+        // All done
+        this.shuffleDeck();
+        this.addLog('Garbage Collection complete, deck shuffled');
+        this.state.pendingAction = null;
+        this.state.phase = GamePhase.PLAYING;
+        this.endTurn();
+    }
+
+    return { success: true };
   }
 
   // Execute catomic bomb

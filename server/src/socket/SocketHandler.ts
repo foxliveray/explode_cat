@@ -16,6 +16,10 @@ export class SocketHandler {
   private io: TypedServer;
   private roomManager: RoomManager;
   private games: Map<string, GameEngine> = new Map();
+  // 断线玩家的缓存，储存 {playerId: {roomId, timeout, playerName}}
+  private disconnectedPlayers: Map<string, { roomId: string; timeoutId: NodeJS.Timeout; playerName: string; socketId: string }> = new Map();
+  // 断线宽容期（30秒）
+  private readonly DISCONNECT_GRACE_PERIOD = 30000;
 
   constructor(io: TypedServer, roomManager: RoomManager) {
     this.io = io;
@@ -32,6 +36,7 @@ export class SocketHandler {
       // Room events
       socket.on('room:create', (data) => this.handleCreateRoom(socket, data));
       socket.on('room:join', (data) => this.handleJoinRoom(socket, data));
+      socket.on('room:rejoin', (data) => this.handleRejoinRoom(socket, data));
       socket.on('room:leave', () => this.handleLeaveRoom(socket));
       socket.on('room:ready', (isReady) => this.handleReady(socket, isReady));
       socket.on('room:updateSettings', (settings) => this.handleUpdateSettings(socket, settings));
@@ -42,6 +47,8 @@ export class SocketHandler {
       socket.on('game:playCards', (cardIds) => this.handlePlayCards(socket, cardIds));
       socket.on('game:drawCard', () => this.handleDrawCard(socket));
       socket.on('game:drawFromBottom', () => this.handleDrawFromBottom(socket));
+      socket.on('game:nope', (cardId) => this.handlePlayNope(socket, cardId));
+      socket.on('game:passNope', () => this.handlePassNope(socket));
 
       // Action responses
       socket.on('action:selectPlayer', (playerId) => this.handleSelectPlayer(socket, playerId));
@@ -50,6 +57,7 @@ export class SocketHandler {
       socket.on('action:selectCardFromDiscard', (cardId) => this.handleSelectFromDiscard(socket, cardId));
       socket.on('action:placeExplodingKitten', (position) => this.handlePlaceExplodingKitten(socket, position));
       socket.on('action:reorderCards', (cardIds) => this.handleReorderCards(socket, cardIds));
+      socket.on('action:selectCardForGarbage', (cardId) => this.handleSelectCardForGarbage(socket, cardId));
       socket.on('action:dismissViewCards', () => this.handleDismissViewCards(socket));
 
       // Disconnect
@@ -98,6 +106,62 @@ export class SocketHandler {
     // Notify others
     socket.to(room.id).emit('room:updated', this.getRoomData(room));
     console.log(`${data.playerName} joined room ${room.code}`);
+  }
+
+  // Handle rejoining room (reconnection)
+  private handleRejoinRoom(socket: TypedSocket, data: { roomCode: string; playerName: string; playerId: string }): void {
+    console.log(`Player ${data.playerName} attempting to rejoin room ${data.roomCode}`);
+    
+    // 检查是否在断线缓存中
+    const disconnectedInfo = this.disconnectedPlayers.get(data.playerId);
+    if (disconnectedInfo) {
+      // 清除定时器
+      clearTimeout(disconnectedInfo.timeoutId);
+      this.disconnectedPlayers.delete(data.playerId);
+    }
+    
+    // 尝试通过房间码找到房间
+    const room = this.roomManager.getRoomByCode(data.roomCode);
+    if (!room) {
+      socket.emit('error', '房间不存在或已关闭');
+      return;
+    }
+    
+    // 查找玩家是否在房间中
+    const existingPlayer = room.players.find(p => p.id === data.playerId || p.name === data.playerName);
+    
+    if (existingPlayer) {
+      // 更新玩家的 socket ID（包括 RoomManager 中的映射）
+      const oldSocketId = existingPlayer.socketId;
+      this.roomManager.updatePlayerSocket(existingPlayer.id, oldSocketId, socket.id);
+      
+      // 加入 socket 房间
+      socket.join(room.id);
+      
+      // 获取游戏状态（如果游戏已开始）
+      const game = this.games.get(room.id);
+      let gameState = null;
+      if (game) {
+        // 更新游戏引擎中的 socket ID
+        game.updatePlayerSocketId(existingPlayer.id, socket.id);
+        gameState = game.getClientState(existingPlayer.id);
+      }
+      
+      // 发送重连成功事件
+      socket.emit('room:rejoined', {
+        room: this.getRoomData(room),
+        gameState,
+        playerId: existingPlayer.id,
+      });
+      
+      console.log(`Player ${data.playerName} rejoined room ${room.code}`);
+      
+      // 通知其他玩家
+      socket.to(room.id).emit('room:updated', this.getRoomData(room));
+    } else {
+      // 玩家不在房间中，尝试作为新玩家加入
+      this.handleJoinRoom(socket, { roomCode: data.roomCode, playerName: data.playerName });
+    }
   }
 
   // Handle leaving room
@@ -471,10 +535,87 @@ export class SocketHandler {
     this.broadcastGameState(room.id, game);
   }
 
-  // Handle disconnect
+  // Handle playing Nope card during nope window
+  private handlePlayNope(socket: TypedSocket, cardId: string): void {
+    const { game, player, room } = this.getGameContext(socket);
+    if (!game || !player || !room) return;
+
+    const result = game.playNope(player.id, cardId);
+    
+    if (!result.success) {
+      socket.emit('error', result.error || 'Cannot play Nope');
+      return;
+    }
+
+    // 广播状态更新
+    this.broadcastGameState(room.id, game);
+  }
+
+  // Handle selecting card for Garbage Collection
+  private handleSelectCardForGarbage(socket: TypedSocket, cardId: string): void {
+    const { game, player, room } = this.getGameContext(socket);
+    if (!game || !player || !room) return;
+
+    const result = game.selectCardForGarbage(player.id, cardId);
+    
+    if (!result.success) {
+      socket.emit('error', result.error || 'Cannot select card');
+      return;
+    }
+
+    this.broadcastGameState(room.id, game);
+  }
+
+  // Handle passing on Nope opportunity
+  private handlePassNope(socket: TypedSocket): void {
+    const { game, player, room } = this.getGameContext(socket);
+    if (!game || !player || !room) return;
+
+    const result = game.passNope(player.id);
+    
+    if (!result.success) {
+      socket.emit('error', result.error || 'Cannot pass');
+      return;
+    }
+
+    // 广播状态更新
+    this.broadcastGameState(room.id, game);
+  }
+
+  // Handle disconnect - add grace period for reconnection
   private handleDisconnect(socket: TypedSocket): void {
     console.log(`Client disconnected: ${socket.id}`);
-    this.handleLeaveRoom(socket);
+    
+    const playerInfo = this.roomManager.getPlayerBySocketId(socket.id);
+    if (!playerInfo) return;
+    
+    const { player, room } = playerInfo;
+    
+    // 如果游戏已经开始，给予宽容期而不是立即移除
+    if (room.isGameStarted) {
+      console.log(`Player ${player.name} disconnected during game, starting grace period...`);
+      
+      // 设置超时定时器
+      const timeoutId = setTimeout(() => {
+        console.log(`Grace period expired for ${player.name}, removing from game`);
+        this.disconnectedPlayers.delete(player.id);
+        this.handleLeaveRoom(socket);
+      }, this.DISCONNECT_GRACE_PERIOD);
+      
+      // 保存断线信息
+      this.disconnectedPlayers.set(player.id, {
+        roomId: room.id,
+        timeoutId,
+        playerName: player.name,
+        socketId: socket.id,
+      });
+      
+      // 通知其他玩家该玩家断线
+      socket.to(room.id).emit('room:updated', this.getRoomData(room));
+    } else {
+      // 游戏未开始，直接移除
+      this.handleLeaveRoom(socket);
+    }
   }
 
   // Helper: Get game context

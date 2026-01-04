@@ -50,16 +50,19 @@ export default function Card({ card, size = 'medium', disabled = false, onClick 
       whileTap={!disabled ? { scale: 0.95 } : undefined}
     >
       <div className="card-inner">
-        {/* Card Emoji */}
-        <div className="card-emoji">{def.emoji}</div>
+        {/* Card Icon Area - Left Side */}
+        <div className="card-icon-area">
+          <div className="card-emoji">{def.emoji}</div>
+        </div>
         
-        {/* Card Name */}
-        <div className="card-name">{def.nameZh}</div>
-        
-        {/* Card Description (only on large) */}
-        {size === 'large' && (
-          <div className="card-description">{def.descriptionZh}</div>
-        )}
+        {/* Card Text Area - Right Side */}
+        <div className="card-text-area">
+          <div className="card-name">{def.nameZh}</div>
+          {/* Card Description (only on large) */}
+          {size === 'large' && (
+            <div className="card-description">{def.descriptionZh}</div>
+          )}
+        </div>
       </div>
     </motion.div>
   );

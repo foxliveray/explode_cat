@@ -1,6 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useSocketStore } from '../stores/socketStore';
 import './Room.css';
 
@@ -8,6 +8,7 @@ export default function Room() {
   const { code } = useParams<{ code: string }>();
   const navigate = useNavigate();
   const { room, playerId, gameState, leaveRoom, setReady, startGame, error } = useSocketStore();
+  const [shareMessage, setShareMessage] = useState('');
 
   // Navigate to game when current room's game starts
   useEffect(() => {
@@ -37,12 +38,93 @@ export default function Room() {
     navigate('/');
   };
 
+  // 通用复制函数（兼容性更好）
+  const copyToClipboard = (text: string): boolean => {
+    // 方案1: 现代 Clipboard API
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).catch(() => {});
+      return true;
+    }
+    
+    // 方案2: 传统 execCommand 方式
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-9999px';
+    textArea.style.top = '-9999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    
+    try {
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      return true;
+    } catch (err) {
+      document.body.removeChild(textArea);
+      return false;
+    }
+  };
+
   const copyRoomCode = () => {
-    navigator.clipboard.writeText(room.code);
+    if (copyToClipboard(room.code)) {
+      setShareMessage('房间码已复制！');
+    } else {
+      setShareMessage(`房间码: ${room.code}`);
+    }
+    setTimeout(() => setShareMessage(''), 3000);
+  };
+
+  // 生成分享链接
+  const getShareUrl = () => {
+    const baseUrl = window.location.origin;
+    return `${baseUrl}/?code=${room.code}`;
+  };
+
+  // 分享房间
+  const shareRoom = async () => {
+    const shareUrl = getShareUrl();
+    const shareText = `来和我一起玩炸弹猫吧！房间码: ${room.code}`;
+    
+    // 尝试使用 Web Share API（移动端友好）
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: '炸弹猫 - 加入房间',
+          text: shareText,
+          url: shareUrl,
+        });
+        return;
+      } catch (err) {
+        // 用户取消分享或不支持，fallback 到复制
+      }
+    }
+    
+    // Fallback: 复制链接到剪贴板
+    if (copyToClipboard(shareUrl)) {
+      setShareMessage('邀请链接已复制！');
+    } else {
+      setShareMessage(`链接: ${shareUrl}`);
+    }
+    setTimeout(() => setShareMessage(''), 3000);
   };
 
   return (
     <div className="room page">
+      {/* Share Message Toast */}
+      <AnimatePresence>
+        {shareMessage && (
+          <motion.div 
+            className="share-toast"
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+          >
+            ✅ {shareMessage}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Header */}
       <header className="room-header">
         <button className="btn btn-ghost btn-sm" onClick={handleLeave}>
@@ -53,6 +135,9 @@ export default function Room() {
           <span className="code-value">{room.code}</span>
           <span className="code-copy">📋</span>
         </div>
+        <button className="btn btn-primary btn-sm share-btn" onClick={shareRoom}>
+          📤 邀请好友
+        </button>
       </header>
 
       {/* Error */}

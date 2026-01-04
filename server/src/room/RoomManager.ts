@@ -158,6 +158,50 @@ export class RoomManager {
     return { player, room };
   }
 
+  // Update player socket ID (for reconnection)
+  updatePlayerSocket(playerId: string, oldSocketId: string, newSocketId: string): boolean {
+    const roomId = this.playerRooms.get(playerId);
+    if (!roomId) return false;
+
+    const room = this.rooms.get(roomId);
+    if (!room) return false;
+
+    const player = room.players.find(p => p.id === playerId);
+    if (!player) return false;
+
+    // Update socket mapping
+    this.socketToPlayer.delete(oldSocketId);
+    this.socketToPlayer.set(newSocketId, playerId);
+    player.socketId = newSocketId;
+
+    return true;
+  }
+
+  // Find player by ID in any room
+  getPlayerById(playerId: string): { player: RoomPlayer; room: Room } | undefined {
+    const roomId = this.playerRooms.get(playerId);
+    if (!roomId) return undefined;
+
+    const room = this.rooms.get(roomId);
+    if (!room) return undefined;
+
+    const player = room.players.find(p => p.id === playerId);
+    if (!player) return undefined;
+
+    return { player, room };
+  }
+
+  // Find player by name in a specific room
+  getPlayerByNameInRoom(roomCode: string, playerName: string): { player: RoomPlayer; room: Room } | undefined {
+    const room = this.getRoomByCode(roomCode);
+    if (!room) return undefined;
+
+    const player = room.players.find(p => p.name === playerName);
+    if (!player) return undefined;
+
+    return { player, room };
+  }
+
   // Update player ready status
   setPlayerReady(socketId: string, isReady: boolean): Room | null {
     const result = this.getPlayerBySocketId(socketId);

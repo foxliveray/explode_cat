@@ -29,10 +29,13 @@ interface SocketState {
   // Game actions  
   playCards: (cardIds: string[]) => void;
   drawCard: () => void;
+  playNope: (cardId: string) => void;
+  passNope: () => void;
   selectPlayer: (playerId: string) => void;
   selectCardName: (cardType: CardType) => void;
   giveCard: (cardId: string) => void;
   selectCardFromDiscard: (cardId: string) => void;
+  selectCardForGarbage: (cardId: string) => void;
   placeExplodingKitten: (position: number) => void;
   reorderCards: (cardIds: string[]) => void;
   dismissViewCards: () => void; // Confirm viewing cards (See the Future)
@@ -60,16 +63,45 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     
     const socket: TypedSocket = io(serverUrl, {
       transports: ['websocket'],
+      // 重连配置
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000,
     });
 
     socket.on('connect', () => {
       console.log('Connected to server');
       set({ isConnected: true });
+      
+      // 尝试恢复之前的 session
+      const savedSession = sessionStorage.getItem('gameSession');
+      if (savedSession) {
+        try {
+          const session = JSON.parse(savedSession);
+          console.log('Attempting to rejoin room:', session.roomCode);
+          socket.emit('room:rejoin', {
+            roomCode: session.roomCode,
+            playerName: session.playerName,
+            playerId: session.playerId,
+          });
+        } catch (e) {
+          console.error('Failed to parse saved session:', e);
+          sessionStorage.removeItem('gameSession');
+        }
+      }
     });
 
-    socket.on('disconnect', () => {
-      console.log('Disconnected from server');
+    socket.on('disconnect', (reason) => {
+      console.log('Disconnected from server:', reason);
       set({ isConnected: false });
+      
+      // 如果是传输错误，socket.io 会自动重连
+      if (reason === 'io server disconnect') {
+        // 服务器主动断开，不自动重连
+        sessionStorage.removeItem('gameSession');
+      }
     });
 
     socket.on('connected', ({ playerId }) => {
@@ -83,11 +115,25 @@ export const useSocketStore = create<SocketState>((set, get) => ({
 
     // Room events
     socket.on('room:created', ({ room }) => {
-      set({ room, gameState: null }); // Clear old gameState
+      set({ room, gameState: null });
+      // 保存 session 用于重连
+      const { playerId } = get();
+      sessionStorage.setItem('gameSession', JSON.stringify({
+        roomCode: room.code,
+        playerName: room.players.find((p: any) => p.id === playerId)?.name,
+        playerId,
+      }));
     });
 
     socket.on('room:joined', (room) => {
-      set({ room, gameState: null }); // Clear old gameState
+      set({ room, gameState: null });
+      // 保存 session 用于重连
+      const { playerId } = get();
+      sessionStorage.setItem('gameSession', JSON.stringify({
+        roomCode: room.code,
+        playerName: room.players.find((p: any) => p.id === playerId)?.name,
+        playerId,
+      }));
     });
 
     socket.on('room:updated', (room) => {
@@ -96,6 +142,17 @@ export const useSocketStore = create<SocketState>((set, get) => ({
 
     socket.on('room:kicked', () => {
       set({ room: null, error: 'You have been kicked from the room' });
+      sessionStorage.removeItem('gameSession');
+    });
+    
+    // 重连成功
+    socket.on('room:rejoined', (data) => {
+      console.log('Successfully rejoined room');
+      set({ 
+        room: data.room, 
+        gameState: data.gameState || null,
+        playerId: data.playerId,
+      });
     });
 
     // Game events
@@ -113,7 +170,20 @@ export const useSocketStore = create<SocketState>((set, get) => ({
 
     socket.on('game:over', ({ winnerName }) => {
       set({ error: `Game Over! ${winnerName} wins!` });
+      sessionStorage.removeItem('gameSession');
     });
+
+    // 监听页面可见性变化，手机切换应用时触发
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && !socket.connected) {
+        console.log('Page visible, attempting reconnect...');
+        socket.connect();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // 保存清理函数以便断开时移除监听
+    (socket as any)._visibilityHandler = handleVisibilityChange;
 
     set({ socket });
   },
@@ -166,6 +236,16 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     set({ isMyTurn: false });
   },
 
+  playNope: (cardId: string) => {
+    const { socket } = get();
+    socket?.emit('game:nope', cardId);
+  },
+
+  passNope: () => {
+    const { socket } = get();
+    socket?.emit('game:passNope');
+  },
+
   selectPlayer: (playerId) => {
     const { socket } = get();
     socket?.emit('action:selectPlayer', playerId);
@@ -184,6 +264,11 @@ export const useSocketStore = create<SocketState>((set, get) => ({
   selectCardFromDiscard: (cardId) => {
     const { socket } = get();
     socket?.emit('action:selectCardFromDiscard', cardId);
+  },
+
+  selectCardForGarbage: (cardId: string) => {
+    const { socket } = get();
+    socket?.emit('action:selectCardForGarbage', cardId);
   },
 
   placeExplodingKitten: (position) => {

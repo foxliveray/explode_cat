@@ -7,6 +7,8 @@ import PlayerPanel from '../components/PlayerPanel';
 import ActionModal from '../components/ActionModal';
 import GameLog from '../components/GameLog';
 import CardRules from '../components/CardRules';
+import MusicControl from '../components/MusicControl';
+import { useBackgroundMusic } from '../hooks/useBackgroundMusic';
 import './Game.css';
 
 export default function Game() {
@@ -15,7 +17,9 @@ export default function Game() {
   const { 
     gameState, 
     playCards, 
-    drawCard, 
+    drawCard,
+    playNope,
+    passNope,
     error,
     leaveRoom,
   } = useSocketStore();
@@ -24,6 +28,9 @@ export default function Game() {
   const [showLog, setShowLog] = useState(false);
   const [showRules, setShowRules] = useState(false);
   const [showQuitConfirm, setShowQuitConfirm] = useState(false);
+  
+  // 背景音乐
+  const { isPlaying, volume, currentTrack, togglePlay, setVolume, nextTrack } = useBackgroundMusic();
 
   // Navigate home if no game
   useEffect(() => {
@@ -50,9 +57,30 @@ export default function Game() {
   const isCurrentPlayer = myIndex === currentPlayerIndex;
   const currentPlayer = players[currentPlayerIndex];
 
+  // 检查一张卡是否是 NOPE 卡
+  const isNopeCard = (cardId: string) => {
+    const card = myHand.find(c => c.id === cardId);
+    return card?.type === 'nope';
+  };
+
+  // 检查手牌中是否有 NOPE 卡
+  const hasNopeCard = myHand.some(c => c.type === 'nope');
+
+  // 检查是否在否决窗口且轮到自己响应
+  const isMyNopeWindow = pendingAction?.type === 'nope_window' && 
+    pendingAction.playerId === gameState.myId;
+
+  // 是否可以打出否决牌
+  const canPlayNope = isMyNopeWindow && hasNopeCard;
+
   // Toggle card selection
   const toggleCard = (cardId: string) => {
-    if (!isCurrentPlayer || phase !== 'playing') return;
+    // 正常情况：是自己回合且在 playing 阶段
+    const isNormalTurn = isCurrentPlayer && phase === 'playing';
+    // 特殊情况：可以否决时允许选择 NOPE 卡
+    const canSelectNope = canPlayNope && isNopeCard(cardId);
+    
+    if (!isNormalTurn && !canSelectNope) return;
     
     setSelectedCards(prev => 
       prev.includes(cardId) 
@@ -89,6 +117,14 @@ export default function Game() {
           </span>
         </div>
         <div className="header-buttons">
+          <MusicControl
+            isPlaying={isPlaying}
+            volume={volume}
+            currentTrack={currentTrack}
+            onTogglePlay={togglePlay}
+            onVolumeChange={setVolume}
+            onNextTrack={nextTrack}
+          />
           <button className="btn btn-ghost btn-sm" onClick={() => setShowRules(true)}>
             📖 规则
           </button>
@@ -157,10 +193,20 @@ export default function Game() {
               className={`deck ${isCurrentPlayer ? 'clickable' : ''}`}
               onClick={handleDrawCard}
             >
-              <div className="deck-back">
-                <span className="deck-count">{deckCount}</span>
-                <span className="deck-label">牌堆</span>
-              </div>
+              {gameState.topDeckCard ? (
+                <div className="deck-top-face-up">
+                  <Card card={gameState.topDeckCard} size="medium" />
+                  <div className="deck-warning-overlay">
+                    <span>⚠️ 危险!</span>
+                  </div>
+                  <span className="deck-count-badge">{deckCount}</span>
+                </div>
+              ) : (
+                <div className="deck-back">
+                  <span className="deck-count">{deckCount}</span>
+                  <span className="deck-label">牌堆</span>
+                </div>
+              )}
             </div>
 
             {/* Discard Pile */}
@@ -184,14 +230,21 @@ export default function Game() {
               <motion.div
                 key={card.id}
                 className={`hand-card ${selectedCards.includes(card.id) ? 'selected' : ''}`}
+                style={{ zIndex: index }}
                 onClick={() => toggleCard(card.id)}
-                initial={{ opacity: 0, y: 50 }}
+                initial={{ opacity: 0, y: 30 }}
                 animate={{ 
                   opacity: 1, 
                   y: selectedCards.includes(card.id) ? -20 : 0,
                 }}
-                transition={{ delay: index * 0.05 }}
-                whileHover={{ y: -10, scale: 1.05 }}
+                transition={{ 
+                  type: 'spring',
+                  stiffness: 300,
+                  damping: 25,
+                }}
+                whileHover={{ 
+                  y: selectedCards.includes(card.id) ? -20 : -10,
+                }}
               >
                 <Card card={card} size="medium" />
               </motion.div>
@@ -219,15 +272,44 @@ export default function Game() {
             </button>
           </>
         )}
-        {!isCurrentPlayer && phase === 'playing' && (
+        {!isCurrentPlayer && phase === 'playing' && !isMyNopeWindow && (
           <div className="waiting-message">
             等待 {currentPlayer?.name} 行动...
           </div>
         )}
+        {isMyNopeWindow && (
+          <div className="nope-action">
+            <span className="nope-hint">
+              🚫 {pendingAction?.originalAction?.cardTypes?.length 
+                ? `有人打出了卡牌，要否决吗？` 
+                : '有动作可以否决！'}
+            </span>
+            <div className="nope-buttons">
+              <button 
+                className="btn btn-danger btn-lg"
+                onClick={() => {
+                  if (selectedCards.length > 0 && selectedCards.every(isNopeCard)) {
+                    playNope(selectedCards[0]);
+                    setSelectedCards([]);
+                  }
+                }}
+                disabled={selectedCards.length === 0 || !selectedCards.every(isNopeCard)}
+              >
+                🚫 打出否决牌
+              </button>
+              <button 
+                className="btn btn-ghost btn-lg"
+                onClick={() => passNope()}
+              >
+                ⏭️ 跳过
+              </button>
+            </div>
+          </div>
+        )}
       </footer>
 
-      {/* Action Modal */}
-      {pendingAction && (
+      {/* Action Modal - 非否决窗口期间显示 */}
+      {pendingAction && pendingAction.type !== 'nope_window' && (
         <ActionModal 
           action={pendingAction}
           players={players}

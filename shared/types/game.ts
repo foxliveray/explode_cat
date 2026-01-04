@@ -41,17 +41,25 @@ export enum PendingActionType {
   VIEW_CARDS = 'view_cards', // See the Future - just view, no reorder
   SELECT_CARD_TO_GIVE = 'select_card_to_give',
   SELECT_CARD_FOR_GARBAGE = 'select_card_for_garbage',
+  NOPE_WINDOW = 'nope_window', // Asking player if they want to play Nope
 }
 
 // Pending action details
 export interface PendingAction {
   type: PendingActionType;
-  playerId: string;
+  playerId: string; // Who needs to respond
   targetPlayerId?: string;
   cards?: Card[];
   count?: number;
   cardType?: CardType;
   waitingForPlayers?: string[]; // For garbage collection
+  // For Nope window
+  originalAction?: {
+    type: PendingActionType;
+    playerId: string; // Who played the card
+    cardTypes: CardType[]; // What cards were played
+  };
+  nopeChainCount?: number; // How many Nopes have been chained
 }
 
 // Game state
@@ -136,6 +144,7 @@ export interface ClientGameState {
   turnCount: number;
   logs: GameLog[];
   topCards?: Card[]; // Only visible when using See/Alter the Future
+  topDeckCard?: Card; // Top card if face up (e.g., Imploding Kitten)
 }
 
 // Client player view

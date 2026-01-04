@@ -7,6 +7,7 @@ export interface ClientToServerEvents {
   // Room events
   'room:create': (data: { playerName: string; settings?: Partial<RoomSettings> }) => void;
   'room:join': (data: { roomCode: string; playerName: string }) => void;
+  'room:rejoin': (data: { roomCode: string; playerName: string; playerId: string }) => void;
   'room:leave': () => void;
   'room:ready': (isReady: boolean) => void;
   'room:updateSettings': (settings: Partial<RoomSettings>) => void;
@@ -41,6 +42,7 @@ export interface ServerToClientEvents {
   // Room events
   'room:created': (data: { roomCode: string; room: RoomData }) => void;
   'room:joined': (room: RoomData) => void;
+  'room:rejoined': (data: { room: RoomData; gameState: ClientGameState | null; playerId: string }) => void;
   'room:updated': (room: RoomData) => void;
   'room:playerJoined': (player: RoomPlayer) => void;
   'room:playerLeft': (playerId: string) => void;

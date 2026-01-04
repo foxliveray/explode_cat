@@ -1,11 +1,12 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useSocketStore } from '../stores/socketStore';
 import './Home.css';
 
 export default function Home() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { createRoom, joinRoom, room, error, isConnected } = useSocketStore();
   const [playerName, setPlayerName] = useState('');
   const [roomCode, setRoomCode] = useState('');
@@ -14,6 +15,15 @@ export default function Home() {
   // Expansion settings
   const [implodingKittens, setImplodingKittens] = useState(true);
   const [streakingKittens, setStreakingKittens] = useState(true);
+
+  // 从 URL 参数读取房间码
+  useEffect(() => {
+    const codeFromUrl = searchParams.get('code');
+    if (codeFromUrl) {
+      setRoomCode(codeFromUrl.toUpperCase());
+      setMode('join');
+    }
+  }, [searchParams]);
 
   // Navigate when room is created/joined
   if (room) {

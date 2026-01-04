@@ -219,7 +219,7 @@ export const CARD_DEFINITIONS: Record<CardType, CardDefinition> = {
     descriptionZh: "私密查看牌堆顶5张",
     category: CardCategory.ACTION,
     source: CardSource.STREAKING_KITTENS,
-    count: 2,
+    count: 0, // 禁用，统一使用3张版本
     emoji: "🔮",
   },
   [CardType.ALTER_THE_FUTURE_3]: {
@@ -241,7 +241,7 @@ export const CARD_DEFINITIONS: Record<CardType, CardDefinition> = {
     descriptionZh: "私密查看并重排牌堆顶5张",
     category: CardCategory.ACTION,
     source: CardSource.STREAKING_KITTENS,
-    count: 2,
+    count: 0, // 禁用，统一使用3张版本
     emoji: "✨",
   },
   [CardType.REVERSE]: {
